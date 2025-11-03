@@ -4,6 +4,16 @@
 #include <string>
 #include <functional>
 
+#if __has_include(<vulkan/vulkan.h>)
+#include <vulkan/vulkan.h>
+#else
+// Minimal forward declarations to avoid hard Vulkan dependency at header parse time
+typedef struct VkInstance_T* VkInstance;
+typedef struct VkSurfaceKHR_T* VkSurfaceKHR;
+struct VkAllocationCallbacks;
+typedef int VkResult;
+#endif
+
 namespace wm {
 
 enum class WmError : int {
@@ -82,6 +92,13 @@ public:
     virtual void setEventCallback(const EventCallback &cb) = 0;
     virtual void setErrorCallback(const ErrorCallback &cb) = 0;
     virtual std::vector<std::string> getVulkanInstanceExtensions() const = 0;
+
+    virtual VkResult createVulkanWindowSurface(
+        VkInstance instance,
+        Window &window,
+        const VkAllocationCallbacks *allocator,
+        VkSurfaceKHR *surface
+    ) const = 0;
     static std::unique_ptr<WindowManager> createDefault();
     static std::unique_ptr<WindowManager> createWayland();
 };

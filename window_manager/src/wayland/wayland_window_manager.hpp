@@ -52,6 +52,12 @@ public:
     void setEventCallback(const wm::EventCallback &cb) override { m_eventCb = cb; }
     void setErrorCallback(const wm::ErrorCallback &cb) override { m_errorCb = cb; }
     std::vector<std::string> getVulkanInstanceExtensions() const override;
+    VkResult createVulkanWindowSurface(
+        VkInstance instance,
+        wm::Window &window,
+        const VkAllocationCallbacks *allocator,
+        VkSurfaceKHR *surface
+    ) const override;
 
     wl_display *display() const { return m_display; }
     wl_compositor *compositor() const { return m_compositor; }
@@ -118,6 +124,7 @@ public:
     static void handle_pointer_axis_value120(void *data, wl_pointer *pointer, uint32_t axis, int32_t value120);
 
 private:
+    friend class WaylandWindowManager;
     static int create_shm_file(size_t size);
     bool create_buffer(int width, int height, uint32_t xrgb);
 

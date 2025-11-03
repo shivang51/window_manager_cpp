@@ -36,6 +36,10 @@ void xdg_toplevel_set_app_id(xdg_toplevel*, const char*);
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#if __has_include(<vulkan/vulkan.h>)
+#include <vulkan/vulkan.h>
+#include <vulkan/vulkan_wayland.h>
+#endif
 
 namespace wm::wayland_impl {
 
@@ -85,6 +89,45 @@ std::unique_ptr<wm::WindowManager> WaylandWindowManager::create()
 std::vector<std::string> WaylandWindowManager::getVulkanInstanceExtensions() const
 {
     return {"VK_KHR_surface", "VK_KHR_wayland_surface"};
+}
+
+VkResult WaylandWindowManager::createVulkanWindowSurface(
+    VkInstance instance,
+    wm::Window &window,
+    const VkAllocationCallbacks *allocator,
+    VkSurfaceKHR *surface
+) const
+{
+#if __has_include(<vulkan/vulkan.h>)
+    // Downcast to access Wayland-native handles
+    auto *wlWin = dynamic_cast<WaylandWindow *>(&window);
+    if (!wlWin) {
+        return (VkResult)(-1);
+    }
+    wl_display *wlDisplay = m_display;
+    wl_surface *wlSurface = wlWin->m_surface; // friend access
+    if (!wlDisplay || !wlSurface) {
+        return (VkResult)(-1);
+    }
+
+    VkWaylandSurfaceCreateInfoKHR createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR;
+    createInfo.pNext = nullptr;
+    createInfo.flags = 0;
+    createInfo.display = wlDisplay;
+    createInfo.surface = wlSurface;
+
+    auto fpCreateWaylandSurfaceKHR = reinterpret_cast<PFN_vkCreateWaylandSurfaceKHR>(
+        vkGetInstanceProcAddr(instance, "vkCreateWaylandSurfaceKHR")
+    );
+    if (!fpCreateWaylandSurfaceKHR) {
+        return (VkResult)(-1);
+    }
+    return fpCreateWaylandSurfaceKHR(instance, &createInfo, allocator, surface);
+#else
+    (void)instance; (void)window; (void)allocator; (void)surface;
+    return (VkResult)(-1);
+#endif
 }
 
 std::shared_ptr<wm::Window> WaylandWindowManager::createWindow(int width, int height, const std::string &title)
