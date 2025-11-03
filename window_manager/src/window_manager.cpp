@@ -7,6 +7,9 @@ namespace wm {
 
 std::unique_ptr<WindowManager> WindowManager::createDefault()
 {
+#ifdef WM_USE_VULKAN
+    std::printf("[WindowManager] With support for vulkan, make sure you create the surface\n");
+#endif
 #if defined(__linux__)
     return WindowManager::createWayland();
 #else

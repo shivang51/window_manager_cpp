@@ -36,7 +36,7 @@ void xdg_toplevel_set_app_id(xdg_toplevel*, const char*);
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#if __has_include(<vulkan/vulkan.h>)
+#ifdef WM_USE_VULKAN
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_wayland.h>
 #endif
@@ -98,7 +98,7 @@ VkResult WaylandWindowManager::createVulkanWindowSurface(
     VkSurfaceKHR *surface
 ) const
 {
-#if __has_include(<vulkan/vulkan.h>)
+#ifdef WM_USE_VULKAN
     // Downcast to access Wayland-native handles
     auto *wlWin = dynamic_cast<WaylandWindow *>(&window);
     if (!wlWin) {

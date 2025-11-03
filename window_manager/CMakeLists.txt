@@ -43,6 +43,14 @@ endif()
 if(UNIX)
     target_link_libraries(${PROJECT_NAME} PUBLIC wayland-client)
 
+    # Toggle Vulkan integration across all TUs
+    option(WM_USE_VULKAN "Enable Vulkan integration in window_manager" OFF)
+    if(WM_USE_VULKAN)
+        find_package(Vulkan REQUIRED)
+        target_compile_definitions(${PROJECT_NAME} PUBLIC WM_USE_VULKAN)
+        target_link_libraries(${PROJECT_NAME} PUBLIC Vulkan::Vulkan)
+    endif()
+
     find_program(WAYLAND_SCANNER_EXECUTABLE NAMES wayland-scanner)
     set(WAYLAND_PROTOCOLS_DIR "/usr/share/wayland-protocols" CACHE PATH "Path to wayland-protocols share directory")
     set(XDG_SHELL_XML "${WAYLAND_PROTOCOLS_DIR}/stable/xdg-shell/xdg-shell.xml")

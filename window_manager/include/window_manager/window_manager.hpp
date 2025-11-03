@@ -4,10 +4,9 @@
 #include <string>
 #include <functional>
 
-#if __has_include(<vulkan/vulkan.h>)
+#ifdef WM_USE_VULKAN
 #include <vulkan/vulkan.h>
 #else
-// Minimal forward declarations to avoid hard Vulkan dependency at header parse time
 typedef struct VkInstance_T* VkInstance;
 typedef struct VkSurfaceKHR_T* VkSurfaceKHR;
 struct VkAllocationCallbacks;
