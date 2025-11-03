@@ -82,6 +82,11 @@ std::unique_ptr<wm::WindowManager> WaylandWindowManager::create()
     return std::unique_ptr<wm::WindowManager>(mgr.release());
 }
 
+std::vector<std::string> WaylandWindowManager::getVulkanInstanceExtensions() const
+{
+    return {"VK_KHR_surface", "VK_KHR_wayland_surface"};
+}
+
 std::shared_ptr<wm::Window> WaylandWindowManager::createWindow(int width, int height, const std::string &title)
 {
     auto win = std::make_shared<WaylandWindow>(*this, width, height, title);

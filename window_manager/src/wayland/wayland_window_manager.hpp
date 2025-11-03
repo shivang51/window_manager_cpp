@@ -51,6 +51,7 @@ public:
 
     void setEventCallback(const wm::EventCallback &cb) override { m_eventCb = cb; }
     void setErrorCallback(const wm::ErrorCallback &cb) override { m_errorCb = cb; }
+    std::vector<std::string> getVulkanInstanceExtensions() const override;
 
     wl_display *display() const { return m_display; }
     wl_compositor *compositor() const { return m_compositor; }

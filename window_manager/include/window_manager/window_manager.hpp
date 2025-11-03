@@ -81,6 +81,7 @@ public:
     virtual void waitEvents() = 0;
     virtual void setEventCallback(const EventCallback &cb) = 0;
     virtual void setErrorCallback(const ErrorCallback &cb) = 0;
+    virtual std::vector<std::string> getVulkanInstanceExtensions() const = 0;
     static std::unique_ptr<WindowManager> createDefault();
     static std::unique_ptr<WindowManager> createWayland();
 };
