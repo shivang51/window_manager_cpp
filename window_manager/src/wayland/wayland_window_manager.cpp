@@ -24,6 +24,7 @@ void xdg_surface_ack_configure(xdg_surface*, uint32_t);
 int xdg_toplevel_add_listener(xdg_toplevel*, const xdg_toplevel_listener*, void*);
 void xdg_toplevel_destroy(xdg_toplevel*);
 void xdg_toplevel_set_title(xdg_toplevel*, const char*);
+void xdg_toplevel_set_app_id(xdg_toplevel*, const char*);
 }
 #endif
 #include <sys/select.h>
@@ -85,7 +86,6 @@ std::shared_ptr<wm::Window> WaylandWindowManager::createWindow(int width, int he
 {
     auto win = std::make_shared<WaylandWindow>(*this, width, height, title);
     m_windows.emplace_back(win);
-    win->show();
     return win;
 }
 
@@ -93,6 +93,11 @@ int WaylandWindowManager::run()
 {
     if (!m_display) return 1;
     while (!m_should_quit && wl_display_dispatch(m_display) != -1) {
+        for (auto &weak_win : m_windows) {
+            if (auto win = weak_win.lock()) {
+                static_cast<WaylandWindow*>(win.get())->mapIfNeeded();
+            }
+        }
     }
     return 0;
 }
@@ -105,6 +110,11 @@ void WaylandWindowManager::requestQuit()
 void WaylandWindowManager::pollEvents()
 {
     if (!m_display) return;
+    for (auto &weak_win : m_windows) {
+        if (auto win = weak_win.lock()) {
+            static_cast<WaylandWindow*>(win.get())->mapIfNeeded();
+        }
+    }
     wl_display_dispatch_pending(m_display);
     wl_display_flush(m_display);
 
@@ -123,6 +133,11 @@ void WaylandWindowManager::pollEvents()
 void WaylandWindowManager::waitEvents()
 {
     if (!m_display) return;
+    for (auto &weak_win : m_windows) {
+        if (auto win = weak_win.lock()) {
+            static_cast<WaylandWindow*>(win.get())->mapIfNeeded();
+        }
+    }
     wl_display_flush(m_display);
     wl_display_dispatch(m_display);
 }
@@ -186,15 +201,14 @@ static constexpr xdg_toplevel_listener XDG_TOPLEVEL_LISTENER = {
 };
 
 WaylandWindow::WaylandWindow(WaylandWindowManager &mgr, const int width, const int height, const std::string &title)
-    : m_mgr(mgr), m_width(width), m_height(height)
+    : m_mgr(mgr), m_width(width), m_height(height), m_title(title), m_initialTitle(title)
 {
     m_surface = wl_compositor_create_surface(mgr.compositor());
     m_xdg_surface = xdg_wm_base_get_xdg_surface(mgr.wm_base(), m_surface);
     xdg_surface_add_listener(m_xdg_surface, &XDG_SURFACE_LISTENER, this);
     m_toplevel = xdg_surface_get_toplevel(m_xdg_surface);
     xdg_toplevel_add_listener(m_toplevel, &XDG_TOPLEVEL_LISTENER, this);
-    setTitle(title);
-    wl_surface_commit(m_surface);
+    xdg_toplevel_set_title(m_toplevel, title.c_str());
 
     setup_pointer(&mgr);
     create_buffer(width, height, 0xFF2BB3AA);
@@ -220,6 +234,33 @@ void WaylandWindow::setup_pointer(WaylandWindowManager *mgr)
     wl_pointer_add_listener(m_pointer, &POINTER_LISTENER, this);
 }
 
+void WaylandWindow::mapIfNeeded()
+{
+    if (!m_surface) return;
+
+    if (!m_initialCommitted) {
+        if (m_toplevel) {
+            const char *appIdToUse = !m_appId.empty() ? m_appId.c_str() : (!m_initialAppId.empty() ? m_initialAppId.c_str() : nullptr);
+            if (appIdToUse) xdg_toplevel_set_app_id(m_toplevel, appIdToUse);
+            if (!m_title.empty()) xdg_toplevel_set_title(m_toplevel, m_title.c_str());
+        }
+        wl_surface_commit(m_surface);
+        m_initialCommitted = true;
+        return;
+    }
+
+    if (m_configured && !m_mapped && m_buf.buffer) {
+        if (m_toplevel) {
+            const char *appIdToUse = !m_appId.empty() ? m_appId.c_str() : (!m_initialAppId.empty() ? m_initialAppId.c_str() : nullptr);
+            if (appIdToUse) xdg_toplevel_set_app_id(m_toplevel, appIdToUse);
+            if (!m_title.empty()) xdg_toplevel_set_title(m_toplevel, m_title.c_str());
+        }
+        wl_surface_attach(m_surface, m_buf.buffer, 0, 0);
+        wl_surface_commit(m_surface);
+        m_mapped = true;
+    }
+}
+
 WaylandWindow::~WaylandWindow()
 {
     if (m_pointer) wl_pointer_destroy(m_pointer);
@@ -233,15 +274,54 @@ WaylandWindow::~WaylandWindow()
 
 void WaylandWindow::setTitle(const std::string &title)
 {
+    m_title = title;
     if (m_toplevel) xdg_toplevel_set_title(m_toplevel, title.c_str());
+}
+
+void WaylandWindow::setAppId(const std::string &appId)
+{
+    if (!appId.empty()) {
+        if (m_initialAppId.empty()) {
+            m_initialAppId = appId;
+        }
+        m_appId = appId;
+        if (m_toplevel) {
+            xdg_toplevel_set_app_id(m_toplevel, appId.c_str());
+            if (!m_configured) {
+                wl_surface_commit(m_surface);
+            }
+        }
+    } else {
+        m_appId = appId;
+    }
 }
 
 void WaylandWindow::show()
 {
+    if (m_toplevel) {
+        if (!m_initialAppId.empty()) {
+            xdg_toplevel_set_app_id(m_toplevel, m_initialAppId.c_str());
+        }
+        if (!m_title.empty()) {
+            xdg_toplevel_set_title(m_toplevel, m_title.c_str());
+        }
+    }
+
+    // Ensure an initial commit occurs so the compositor can send the first configure
+    if (m_surface) {
+        wl_surface_commit(m_surface);
+    }
+
     while (!m_configured) {
         if (wl_display_roundtrip(m_mgr.display()) < 0) break;
     }
     if (m_buf.buffer && m_surface) {
+        if (m_toplevel) {
+            // Re-assert app_id and title in the same commit as the first buffer attach
+            const char *appIdToUse = !m_appId.empty() ? m_appId.c_str() : (!m_initialAppId.empty() ? m_initialAppId.c_str() : nullptr);
+            if (appIdToUse) xdg_toplevel_set_app_id(m_toplevel, appIdToUse);
+            if (!m_title.empty()) xdg_toplevel_set_title(m_toplevel, m_title.c_str());
+        }
         wl_surface_attach(m_surface, m_buf.buffer, 0, 0);
         wl_surface_commit(m_surface);
     }

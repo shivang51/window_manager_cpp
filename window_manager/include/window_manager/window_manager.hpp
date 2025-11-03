@@ -3,7 +3,6 @@
 #include <memory>
 #include <string>
 #include <functional>
-#include <cstdint>
 
 namespace wm {
 
@@ -59,6 +58,11 @@ class Window {
 public:
     virtual ~Window() = default;
     virtual void setTitle(const std::string &title) = 0;
+    virtual void setAppId(const std::string &appId) = 0;
+    virtual std::string getTitle() const = 0;
+    virtual std::string getAppId() const = 0;
+    virtual std::string getInitialTitle() const = 0;
+    virtual std::string getInitialAppId() const = 0;
     virtual void show() = 0;
     virtual bool shouldClose() const = 0;
     virtual int getWidth() const = 0;

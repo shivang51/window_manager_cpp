@@ -87,6 +87,11 @@ public:
     ~WaylandWindow() override;
 
     void setTitle(const std::string &title) override;
+    void setAppId(const std::string &appId) override;
+    std::string getTitle() const override { return m_title; }
+    std::string getAppId() const override { return m_appId; }
+    std::string getInitialTitle() const override { return m_initialTitle; }
+    std::string getInitialAppId() const override { return m_initialAppId; }
     void show() override;
     bool shouldClose() const override { return m_shouldClose; }
     int getWidth() const override { return m_width; }
@@ -95,6 +100,7 @@ public:
     void setMouseCallback(const wm::MouseCallback &cb) override { m_mouseCb = cb; }
 
     void setup_pointer(WaylandWindowManager *mgr);
+    void mapIfNeeded();
 
     static void handle_xdg_surface_configure(void *data, xdg_surface *xdg_surface_obj, uint32_t serial);
     static void handle_toplevel_configure(void *data, xdg_toplevel *toplevel, int32_t width, int32_t height, wl_array *states);
@@ -121,10 +127,16 @@ private:
     wl_pointer *m_pointer = nullptr;
     ShmBuffer m_buf{};
     bool m_configured = false;
+    bool m_initialCommitted = false;
+    bool m_mapped = false;
     bool m_shouldClose = false;
     bool m_hasFocus = false;
     int m_width = 0;
     int m_height = 0;
+    std::string m_title{};
+    std::string m_appId{};
+    std::string m_initialTitle{};
+    std::string m_initialAppId{};
     double m_pointerX = 0.0;
     double m_pointerY = 0.0;
     wm::EventCallback m_windowEventCb{};

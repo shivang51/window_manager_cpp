@@ -1,9 +1,8 @@
-// Use the window_manager API to create and run a Wayland window
+#include "window_manager/window_manager.hpp"
 
 #include <cstdio>
 #include <thread>
 #include <chrono>
-#include "window_manager/window_manager.hpp"
 
 int main(int, char **)
 {
@@ -18,6 +17,9 @@ int main(int, char **)
         std::fprintf(stderr, "Failed to create window\n");
         return 1;
     }
+
+    win1->setAppId("com.shivang51.test");
+    win1->setTitle("Test Window");
 
     manager->setErrorCallback([](wm::WmError err, const std::string &msg){
         std::fprintf(stderr, "[WM ERROR] %d: %s\n", static_cast<int>(err), msg.c_str());
@@ -49,10 +51,11 @@ int main(int, char **)
         }
     });
 
-    // GLFW-like loop using pollEvents; render ticks at ~60fps
+    int frameCount = 0;
     while (!win1->shouldClose()) {
         manager->pollEvents();
         std::this_thread::sleep_for(std::chrono::milliseconds(16));
+        win1->setTitle(std::format("Frame Count {}", frameCount++));
     }
     return 0;
 }
