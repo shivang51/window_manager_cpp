@@ -301,8 +301,7 @@ void WaylandWindow::setAppId(const std::string &appId)
     }
 }
 
-void WaylandWindow::show()
-{
+void WaylandWindow::show() {
     if (m_toplevel) {
         if (!m_initialAppId.empty()) {
             xdg_toplevel_set_app_id(m_toplevel, m_initialAppId.c_str());
@@ -323,7 +322,9 @@ void WaylandWindow::show()
     if (m_buf.buffer && m_surface) {
         if (m_toplevel) {
             // Re-assert app_id and title in the same commit as the first buffer attach
-            const char *appIdToUse = !m_appId.empty() ? m_appId.c_str() : (!m_initialAppId.empty() ? m_initialAppId.c_str() : nullptr);
+            const char *appIdToUse = !m_appId.empty()
+                                     ? m_appId.c_str()
+                                     : (!m_initialAppId.empty() ? m_initialAppId.c_str() : nullptr);
             if (appIdToUse) xdg_toplevel_set_app_id(m_toplevel, appIdToUse);
             if (!m_title.empty()) xdg_toplevel_set_title(m_toplevel, m_title.c_str());
         }
@@ -349,6 +350,7 @@ void WaylandWindow::handle_toplevel_configure(void *data, xdg_toplevel *toplevel
     if (width > 0 && height > 0) {
         self->m_width = width;
         self->m_height = height;
+        self->create_buffer(width, height, 0xFF2BB3AA);
         self->m_windowEventCb(wm::WmEvent::WindowResized, *self);
     }
     
