@@ -350,7 +350,7 @@ void WaylandWindow::handle_toplevel_configure(void *data, xdg_toplevel *toplevel
     if (width > 0 && height > 0) {
         self->m_width = width;
         self->m_height = height;
-        self->create_buffer(width, height, 0xFF2BB3AA);
+        self->create_buffer(width, height, 0xFF030303);
         self->m_windowEventCb(wm::WmEvent::WindowResized, *self);
     }
     
