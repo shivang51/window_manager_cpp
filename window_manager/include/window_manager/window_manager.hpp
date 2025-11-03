@@ -21,6 +21,8 @@ enum class WmEvent : int {
     WindowConfigured,
     WindowCloseRequested,
     WindowResized,
+    WindowFocusGained,
+    WindowFocusLost,
     Ping,
 };
 
@@ -38,6 +40,8 @@ enum class MouseButton : int {
 enum class MouseAction : int {
     Press = 0,
     Release = 1,
+    Move = 2,
+    Wheel = 3,
 };
 
 struct MouseEvent {
@@ -45,6 +49,8 @@ struct MouseEvent {
     double y = 0.0;
     MouseButton button = MouseButton::Left;
     MouseAction action = MouseAction::Press;
+    double deltaX = 0.0;
+    double deltaY = 0.0;
 };
 
 using MouseCallback = std::function<void(const MouseEvent&, Window&)>;
@@ -55,6 +61,8 @@ public:
     virtual void setTitle(const std::string &title) = 0;
     virtual void show() = 0;
     virtual bool shouldClose() const = 0;
+    virtual int getWidth() const = 0;
+    virtual int getHeight() const = 0;
     virtual void setEventCallback(const EventCallback &cb) = 0;
     virtual void setMouseCallback(const MouseCallback &cb) = 0;
 };

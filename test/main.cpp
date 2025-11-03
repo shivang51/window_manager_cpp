@@ -23,20 +23,30 @@ int main(int, char **)
         std::fprintf(stderr, "[WM ERROR] %d: %s\n", static_cast<int>(err), msg.c_str());
     });
 
-    win1->setEventCallback([](wm::WmEvent ev, wm::Window &){
+    win1->setEventCallback([](wm::WmEvent ev, wm::Window &win){
         switch (ev) {
             case wm::WmEvent::WindowConfigured: std::fprintf(stderr, "[EVENT] configured\n"); break;
-            case wm::WmEvent::WindowResized: std::fprintf(stderr, "[EVENT] resized\n"); break;
+            case wm::WmEvent::WindowResized: 
+                std::fprintf(stderr, "[EVENT] resized to %dx%d\n", win.getWidth(), win.getHeight()); 
+                break;
+            case wm::WmEvent::WindowFocusGained: std::fprintf(stderr, "[EVENT] focus gained\n"); break;
+            case wm::WmEvent::WindowFocusLost: std::fprintf(stderr, "[EVENT] focus lost\n"); break;
             case wm::WmEvent::WindowCloseRequested: std::fprintf(stderr, "[EVENT] close requested\n"); break;
             default: break;
         }
     });
 
     win1->setMouseCallback([](const wm::MouseEvent &ev, wm::Window &){
-        const char *btn = (ev.button == wm::MouseButton::Left) ? "L" : 
-                         (ev.button == wm::MouseButton::Right) ? "R" : "M";
-        const char *act = (ev.action == wm::MouseAction::Press) ? "press" : "release";
-        std::fprintf(stderr, "[MOUSE] %s %s at (%.1f, %.1f)\n", btn, act, ev.x, ev.y);
+        if (ev.action == wm::MouseAction::Move) {
+            std::fprintf(stderr, "[MOUSE] move at (%.1f, %.1f)\n", ev.x, ev.y);
+        } else if (ev.action == wm::MouseAction::Wheel) {
+            std::fprintf(stderr, "[MOUSE] wheel (%.1f, %.1f) at (%.1f, %.1f)\n", ev.deltaX, ev.deltaY, ev.x, ev.y);
+        } else {
+            const char *btn = (ev.button == wm::MouseButton::Left) ? "L" : 
+                             (ev.button == wm::MouseButton::Right) ? "R" : "M";
+            const char *act = (ev.action == wm::MouseAction::Press) ? "press" : "release";
+            std::fprintf(stderr, "[MOUSE] %s %s at (%.1f, %.1f)\n", btn, act, ev.x, ev.y);
+        }
     });
 
     // GLFW-like loop using pollEvents; render ticks at ~60fps

@@ -13,6 +13,7 @@ struct xdg_toplevel_listener { void (*configure)(void*, xdg_toplevel*, int32_t, 
 extern const struct wl_interface xdg_wm_base_interface;
 extern const struct wl_interface xdg_surface_interface;
 extern const struct wl_interface xdg_toplevel_interface;
+enum xdg_toplevel_state { XDG_TOPLEVEL_STATE_ACTIVATED = 0 };
 xdg_surface* xdg_wm_base_get_xdg_surface(xdg_wm_base*, wl_surface*);
 int xdg_wm_base_add_listener(xdg_wm_base*, const xdg_wm_base_listener*, void*);
 void xdg_wm_base_pong(xdg_wm_base*, uint32_t);
@@ -185,7 +186,7 @@ static constexpr xdg_toplevel_listener XDG_TOPLEVEL_LISTENER = {
 };
 
 WaylandWindow::WaylandWindow(WaylandWindowManager &mgr, const int width, const int height, const std::string &title)
-    : m_mgr(mgr)
+    : m_mgr(mgr), m_width(width), m_height(height)
 {
     m_surface = wl_compositor_create_surface(mgr.compositor());
     m_xdg_surface = xdg_wm_base_get_xdg_surface(mgr.wm_base(), m_surface);
@@ -257,9 +258,34 @@ void WaylandWindow::handle_xdg_surface_configure(void *data, xdg_surface *xdg_su
 void WaylandWindow::handle_toplevel_configure(void *data, xdg_toplevel *toplevel, const int32_t width, const int32_t height, wl_array *states)
 {
     auto *self = static_cast<WaylandWindow *>(data);
-    (void)toplevel; (void)states;
-    if (self && width > 0 && height > 0 && self->m_windowEventCb) {
+    (void)toplevel;
+    if (!self || !self->m_windowEventCb) return;
+    
+    if (width > 0 && height > 0) {
+        self->m_width = width;
+        self->m_height = height;
         self->m_windowEventCb(wm::WmEvent::WindowResized, *self);
+    }
+    
+    bool hasFocus = false;
+    if (states) {
+        const uint32_t *state = static_cast<const uint32_t *>(states->data);
+        const size_t count = states->size / sizeof(uint32_t);
+        for (size_t i = 0; i < count; ++i) {
+            if (state[i] == 0) {
+                hasFocus = true;
+                break;
+            }
+        }
+    }
+    
+    const bool wasFocused = self->m_hasFocus;
+    self->m_hasFocus = hasFocus;
+    
+    if (hasFocus && !wasFocused) {
+        self->m_windowEventCb(wm::WmEvent::WindowFocusGained, *self);
+    } else if (!hasFocus && wasFocused) {
+        self->m_windowEventCb(wm::WmEvent::WindowFocusLost, *self);
     }
 }
 
@@ -323,10 +349,10 @@ void WaylandWindow::handle_pointer_enter(void *data, wl_pointer *pointer, const 
 {
     auto *self = static_cast<WaylandWindow *>(data);
     (void)pointer; (void)serial; (void)surface;
-    if (self) {
-        self->m_pointerX = wl_fixed_to_double(x);
-        self->m_pointerY = wl_fixed_to_double(y);
-    }
+    if (!self) return;
+    
+    self->m_pointerX = wl_fixed_to_double(x);
+    self->m_pointerY = wl_fixed_to_double(y);
 }
 
 void WaylandWindow::handle_pointer_leave(void *data, wl_pointer *pointer, const uint32_t serial, wl_surface *surface)
@@ -338,10 +364,17 @@ void WaylandWindow::handle_pointer_motion(void *data, wl_pointer *pointer, const
 {
     auto *self = static_cast<WaylandWindow *>(data);
     (void)pointer; (void)time;
-    if (!self) return;
+    if (!self || !self->m_mouseCb) return;
     
     self->m_pointerX = wl_fixed_to_double(x);
     self->m_pointerY = wl_fixed_to_double(y);
+    
+    wm::MouseEvent ev{
+        .x = self->m_pointerX,
+        .y = self->m_pointerY,
+        .action = wm::MouseAction::Move
+    };
+    self->m_mouseCb(ev, *self);
 }
 
 void WaylandWindow::handle_pointer_button(void *data, wl_pointer *pointer, const uint32_t serial, const uint32_t time, const uint32_t button, const uint32_t state)
@@ -366,7 +399,24 @@ void WaylandWindow::handle_pointer_button(void *data, wl_pointer *pointer, const
 
 void WaylandWindow::handle_pointer_axis(void *data, wl_pointer *pointer, uint32_t time, uint32_t axis, wl_fixed_t value)
 {
-    (void)data; (void)pointer; (void)time; (void)axis; (void)value;
+    auto *self = static_cast<WaylandWindow *>(data);
+    (void)pointer; (void)time;
+    if (!self || !self->m_mouseCb) return;
+    
+    const double delta = wl_fixed_to_double(value);
+    wm::MouseEvent ev{
+        .x = self->m_pointerX,
+        .y = self->m_pointerY,
+        .action = wm::MouseAction::Wheel
+    };
+    
+    if (axis == WL_POINTER_AXIS_VERTICAL_SCROLL) {
+        ev.deltaY = delta;
+    } else if (axis == WL_POINTER_AXIS_HORIZONTAL_SCROLL) {
+        ev.deltaX = delta;
+    }
+    
+    self->m_mouseCb(ev, *self);
 }
 
 void WaylandWindow::handle_pointer_frame(void *data, wl_pointer *pointer)

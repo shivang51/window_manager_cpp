@@ -89,6 +89,8 @@ public:
     void setTitle(const std::string &title) override;
     void show() override;
     bool shouldClose() const override { return m_shouldClose; }
+    int getWidth() const override { return m_width; }
+    int getHeight() const override { return m_height; }
     void setEventCallback(const wm::EventCallback &cb) override { m_windowEventCb = cb; }
     void setMouseCallback(const wm::MouseCallback &cb) override { m_mouseCb = cb; }
 
@@ -120,6 +122,9 @@ private:
     ShmBuffer m_buf{};
     bool m_configured = false;
     bool m_shouldClose = false;
+    bool m_hasFocus = false;
+    int m_width = 0;
+    int m_height = 0;
     double m_pointerX = 0.0;
     double m_pointerY = 0.0;
     wm::EventCallback m_windowEventCb{};
