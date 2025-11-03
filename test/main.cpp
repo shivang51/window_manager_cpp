@@ -12,7 +12,7 @@ int main(int, char **)
         return 1;
     }
 
-    auto win1 = manager->createWindow(640, 400, "Window Manager Test");
+    const auto win1 = manager->createWindow(640, 400, "Window Manager Test");
     if (!win1) {
         std::fprintf(stderr, "Failed to create window\n");
         return 1;
