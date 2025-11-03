@@ -26,7 +26,7 @@ void xdg_toplevel_set_title(xdg_toplevel*, const char*);
 }
 #endif
 #include <sys/select.h>
-
+#include <linux/input-event-codes.h>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -51,16 +51,20 @@ WaylandWindowManager::WaylandWindowManager()
     m_display = wl_display_connect(nullptr);
     if (!m_display) {
         std::fprintf(stderr, "[WM] Failed to connect to Wayland display\n");
+        if (m_errorCb) m_errorCb(wm::WmError::ConnectDisplayFailed, "wl_display_connect failed");
         return;
     }
     m_registry = wl_display_get_registry(m_display);
     wl_registry_add_listener(m_registry, &REGISTRY_LISTENER, this);
     wl_display_roundtrip(m_display);
+
+    if (!m_compositor || !m_shm || !m_xdg_wm_base) {
+        if (m_errorCb) m_errorCb(wm::WmError::MissingGlobals, "Required globals missing");
+    }
 }
 
 WaylandWindowManager::~WaylandWindowManager()
 {
-    // Windows should have been destroyed before display disconnect
     if (m_display) {
         wl_display_disconnect(m_display);
         m_display = nullptr;
@@ -76,7 +80,7 @@ std::unique_ptr<wm::WindowManager> WaylandWindowManager::create()
     return std::unique_ptr<wm::WindowManager>(mgr.release());
 }
 
-std::shared_ptr<wm::Window> WaylandWindowManager::create_window(int width, int height, const std::string &title)
+std::shared_ptr<wm::Window> WaylandWindowManager::createWindow(int width, int height, const std::string &title)
 {
     auto win = std::make_shared<WaylandWindow>(*this, width, height, title);
     m_windows.emplace_back(win);
@@ -92,37 +96,34 @@ int WaylandWindowManager::run()
     return 0;
 }
 
-void WaylandWindowManager::request_quit()
+void WaylandWindowManager::requestQuit()
 {
     m_should_quit = true;
 }
 
-void WaylandWindowManager::poll_events()
+void WaylandWindowManager::pollEvents()
 {
     if (!m_display) return;
-    // Dispatch already-read events
     wl_display_dispatch_pending(m_display);
-    // Flush outgoing requests
     wl_display_flush(m_display);
 
-    // Non-blocking read: check fd readability and dispatch if data is available
     const int fd = wl_display_get_fd(m_display);
     if (fd >= 0) {
         fd_set fds;
         FD_ZERO(&fds);
         FD_SET(fd, &fds);
-        timeval tv{}; // zero timeout
+        timeval tv{};
         if (select(fd + 1, &fds, nullptr, nullptr, &tv) > 0 && FD_ISSET(fd, &fds)) {
             wl_display_dispatch(m_display);
         }
     }
 }
 
-void WaylandWindowManager::wait_events()
+void WaylandWindowManager::waitEvents()
 {
     if (!m_display) return;
     wl_display_flush(m_display);
-    wl_display_dispatch(m_display); // blocks until one batch processed
+    wl_display_dispatch(m_display);
 }
 
 void WaylandWindowManager::handle_global(void *data, wl_registry *registry, const uint32_t name, const char *interface, const uint32_t version)
@@ -135,6 +136,13 @@ void WaylandWindowManager::handle_global(void *data, wl_registry *registry, cons
     } else if (strcmp(interface, xdg_wm_base_interface.name) == 0) {
         self->m_xdg_wm_base = static_cast<xdg_wm_base *>(wl_registry_bind(registry, name, &xdg_wm_base_interface, 1));
         xdg_wm_base_add_listener(self->m_xdg_wm_base, &XDG_WM_BASE_LISTENER, self);
+    } else if (strcmp(interface, wl_seat_interface.name) == 0) {
+        self->m_seat = static_cast<wl_seat *>(wl_registry_bind(registry, name, &wl_seat_interface, version < 7 ? version : 7));
+        static constexpr wl_seat_listener SEAT_LISTENER = {
+            .capabilities = WaylandWindowManager::handle_seat_capabilities,
+            .name = WaylandWindowManager::handle_seat_name,
+        };
+        wl_seat_add_listener(self->m_seat, &SEAT_LISTENER, self);
     }
 }
 
@@ -145,10 +153,27 @@ void WaylandWindowManager::handle_global_remove(void *data, wl_registry *registr
 
 void WaylandWindowManager::handle_wm_base_ping(void *data, xdg_wm_base *wm, const uint32_t serial)
 {
-    (void)data; xdg_wm_base_pong(wm, serial);
+    auto *self = static_cast<WaylandWindowManager *>(data);
+    xdg_wm_base_pong(wm, serial);
 }
 
-// ============== Window ==============
+void WaylandWindowManager::handle_seat_capabilities(void *data, wl_seat *seat, const uint32_t caps)
+{
+    auto *self = static_cast<WaylandWindowManager *>(data);
+    (void)seat;
+    if (!(caps & WL_SEAT_CAPABILITY_POINTER)) return;
+    
+    for (auto &weak_win : self->m_windows) {
+        if (auto win = weak_win.lock()) {
+            static_cast<WaylandWindow *>(win.get())->setup_pointer(self);
+        }
+    }
+}
+
+void WaylandWindowManager::handle_seat_name(void *data, wl_seat *seat, const char *name)
+{
+    (void)data; (void)seat; (void)name;
+}
 
 static constexpr xdg_surface_listener XDG_SURFACE_LISTENER = {
     .configure = WaylandWindow::handle_xdg_surface_configure,
@@ -167,30 +192,51 @@ WaylandWindow::WaylandWindow(WaylandWindowManager &mgr, const int width, const i
     xdg_surface_add_listener(m_xdg_surface, &XDG_SURFACE_LISTENER, this);
     m_toplevel = xdg_surface_get_toplevel(m_xdg_surface);
     xdg_toplevel_add_listener(m_toplevel, &XDG_TOPLEVEL_LISTENER, this);
-    set_title(title);
+    setTitle(title);
     wl_surface_commit(m_surface);
 
+    setup_pointer(&mgr);
     create_buffer(width, height, 0xFF2BB3AA);
+}
+
+void WaylandWindow::setup_pointer(WaylandWindowManager *mgr)
+{
+    if (!mgr || m_pointer || !mgr->seat()) return;
+    m_pointer = wl_seat_get_pointer(mgr->seat());
+    if (!m_pointer) return;
+    static constexpr wl_pointer_listener POINTER_LISTENER = {
+        .enter = handle_pointer_enter,
+        .leave = handle_pointer_leave,
+        .motion = handle_pointer_motion,
+        .button = handle_pointer_button,
+        .axis = handle_pointer_axis,
+        .frame = handle_pointer_frame,
+        .axis_source = handle_pointer_axis_source,
+        .axis_stop = handle_pointer_axis_stop,
+        .axis_discrete = handle_pointer_axis_discrete,
+        .axis_value120 = handle_pointer_axis_value120,
+    };
+    wl_pointer_add_listener(m_pointer, &POINTER_LISTENER, this);
 }
 
 WaylandWindow::~WaylandWindow()
 {
+    if (m_pointer) wl_pointer_destroy(m_pointer);
     if (m_toplevel) xdg_toplevel_destroy(m_toplevel);
     if (m_xdg_surface) xdg_surface_destroy(m_xdg_surface);
     if (m_surface) wl_surface_destroy(m_surface);
     if (m_buf.buffer) wl_buffer_destroy(m_buf.buffer);
-    if (m_buf.data && m_buf.data != MAP_FAILED) munmap(m_buf.data, m_buf.size);
+    m_buf.data.reset();
     if (m_buf.fd >= 0) close(m_buf.fd);
 }
 
-void WaylandWindow::set_title(const std::string &title)
+void WaylandWindow::setTitle(const std::string &title)
 {
     if (m_toplevel) xdg_toplevel_set_title(m_toplevel, title.c_str());
 }
 
 void WaylandWindow::show()
 {
-    // Wait until configured to attach
     while (!m_configured) {
         if (wl_display_roundtrip(m_mgr.display()) < 0) break;
     }
@@ -205,18 +251,24 @@ void WaylandWindow::handle_xdg_surface_configure(void *data, xdg_surface *xdg_su
     auto *self = static_cast<WaylandWindow *>(data);
     xdg_surface_ack_configure(xdg_surface_obj, serial);
     self->m_configured = true;
+    if (self->m_windowEventCb) self->m_windowEventCb(wm::WmEvent::WindowConfigured, *self);
 }
 
 void WaylandWindow::handle_toplevel_configure(void *data, xdg_toplevel *toplevel, const int32_t width, const int32_t height, wl_array *states)
 {
-    (void)data; (void)toplevel; (void)width; (void)height; (void)states;
+    auto *self = static_cast<WaylandWindow *>(data);
+    (void)toplevel; (void)states;
+    if (self && width > 0 && height > 0 && self->m_windowEventCb) {
+        self->m_windowEventCb(wm::WmEvent::WindowResized, *self);
+    }
 }
 
 void WaylandWindow::handle_toplevel_close(void *data, xdg_toplevel *toplevel)
 {
     auto *self = static_cast<WaylandWindow *>(data);
     (void)toplevel;
-    self->m_should_close = true;
+    self->m_shouldClose = true;
+    if (self->m_windowEventCb) self->m_windowEventCb(wm::WmEvent::WindowCloseRequested, *self);
 }
 
 int WaylandWindow::create_shm_file(const size_t size)
@@ -244,24 +296,102 @@ bool WaylandWindow::create_buffer(const int width, const int height, const uint3
     m_buf.fd = create_shm_file(m_buf.size);
     if (m_buf.fd < 0) return false;
 
-    m_buf.data = mmap(nullptr, m_buf.size, PROT_READ | PROT_WRITE, MAP_SHARED, m_buf.fd, 0);
-    if (m_buf.data == MAP_FAILED) {
+    void *raw_data = mmap(nullptr, m_buf.size, PROT_READ | PROT_WRITE, MAP_SHARED, m_buf.fd, 0);
+    if (raw_data == MAP_FAILED) {
         close(m_buf.fd);
         m_buf.fd = -1;
         return false;
     }
 
+    MmapDeleter deleter{.m_size = m_buf.size};
+    m_buf.data = MmapUniquePtr(raw_data, deleter);
+
     wl_shm_pool *pool = wl_shm_create_pool(m_mgr.shm(), m_buf.fd, static_cast<int>(m_buf.size));
     m_buf.buffer = wl_shm_pool_create_buffer(pool, 0, width, height, m_buf.stride, WL_SHM_FORMAT_XRGB8888);
     wl_shm_pool_destroy(pool);
 
-    auto *pixels = static_cast<uint32_t *>(m_buf.data);
+    auto *pixels = static_cast<uint32_t *>(m_buf.data.get());
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
             pixels[y * width + x] = xrgb;
         }
     }
     return true;
+}
+
+void WaylandWindow::handle_pointer_enter(void *data, wl_pointer *pointer, const uint32_t serial, wl_surface *surface, const wl_fixed_t x, const wl_fixed_t y)
+{
+    auto *self = static_cast<WaylandWindow *>(data);
+    (void)pointer; (void)serial; (void)surface;
+    if (self) {
+        self->m_pointerX = wl_fixed_to_double(x);
+        self->m_pointerY = wl_fixed_to_double(y);
+    }
+}
+
+void WaylandWindow::handle_pointer_leave(void *data, wl_pointer *pointer, const uint32_t serial, wl_surface *surface)
+{
+    (void)data; (void)pointer; (void)serial; (void)surface;
+}
+
+void WaylandWindow::handle_pointer_motion(void *data, wl_pointer *pointer, const uint32_t time, const wl_fixed_t x, const wl_fixed_t y)
+{
+    auto *self = static_cast<WaylandWindow *>(data);
+    (void)pointer; (void)time;
+    if (!self) return;
+    
+    self->m_pointerX = wl_fixed_to_double(x);
+    self->m_pointerY = wl_fixed_to_double(y);
+}
+
+void WaylandWindow::handle_pointer_button(void *data, wl_pointer *pointer, const uint32_t serial, const uint32_t time, const uint32_t button, const uint32_t state)
+{
+    auto *self = static_cast<WaylandWindow *>(data);
+    (void)pointer; (void)serial; (void)time;
+    if (!self || !self->m_mouseCb) return;
+
+    wm::MouseButton mb = wm::MouseButton::Left;
+    if (button == BTN_LEFT) mb = wm::MouseButton::Left;
+    else if (button == BTN_RIGHT) mb = wm::MouseButton::Right;
+    else if (button == BTN_MIDDLE) mb = wm::MouseButton::Middle;
+
+    wm::MouseEvent ev{
+        .x = self->m_pointerX,
+        .y = self->m_pointerY,
+        .button = mb,
+        .action = (state == WL_POINTER_BUTTON_STATE_PRESSED) ? wm::MouseAction::Press : wm::MouseAction::Release
+    };
+    self->m_mouseCb(ev, *self);
+}
+
+void WaylandWindow::handle_pointer_axis(void *data, wl_pointer *pointer, uint32_t time, uint32_t axis, wl_fixed_t value)
+{
+    (void)data; (void)pointer; (void)time; (void)axis; (void)value;
+}
+
+void WaylandWindow::handle_pointer_frame(void *data, wl_pointer *pointer)
+{
+    (void)data; (void)pointer;
+}
+
+void WaylandWindow::handle_pointer_axis_source(void *data, wl_pointer *pointer, uint32_t axis_source)
+{
+    (void)data; (void)pointer; (void)axis_source;
+}
+
+void WaylandWindow::handle_pointer_axis_stop(void *data, wl_pointer *pointer, uint32_t time, uint32_t axis)
+{
+    (void)data; (void)pointer; (void)time; (void)axis;
+}
+
+void WaylandWindow::handle_pointer_axis_discrete(void *data, wl_pointer *pointer, uint32_t axis, int32_t discrete)
+{
+    (void)data; (void)pointer; (void)axis; (void)discrete;
+}
+
+void WaylandWindow::handle_pointer_axis_value120(void *data, wl_pointer *pointer, uint32_t axis, int32_t value120)
+{
+    (void)data; (void)pointer; (void)axis; (void)value120;
 }
 
 } // namespace wm::wayland_impl

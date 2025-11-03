@@ -1,37 +1,76 @@
-// Public API for cross-platform window management (Wayland implementation currently)
-
 #pragma once
 
 #include <memory>
 #include <string>
+#include <functional>
+#include <cstdint>
 
 namespace wm {
+
+enum class WmError : int {
+    None = 0,
+    ConnectDisplayFailed,
+    MissingGlobals,
+    CreateSurfaceFailed,
+    ShmFailed,
+    ProtocolError,
+};
+
+enum class WmEvent : int {
+    None = 0,
+    WindowConfigured,
+    WindowCloseRequested,
+    WindowResized,
+    Ping,
+};
+
+class Window;
+
+using EventCallback = std::function<void(WmEvent, Window&)>;
+using ErrorCallback = std::function<void(WmError, const std::string&)>;
+
+enum class MouseButton : int {
+    Left = 0x110,
+    Right = 0x111,
+    Middle = 0x112,
+};
+
+enum class MouseAction : int {
+    Press = 0,
+    Release = 1,
+};
+
+struct MouseEvent {
+    double x = 0.0;
+    double y = 0.0;
+    MouseButton button = MouseButton::Left;
+    MouseAction action = MouseAction::Press;
+};
+
+using MouseCallback = std::function<void(const MouseEvent&, Window&)>;
 
 class Window {
 public:
     virtual ~Window() = default;
-    virtual void set_title(const std::string &title) = 0;
+    virtual void setTitle(const std::string &title) = 0;
     virtual void show() = 0;
-    virtual bool should_close() const = 0;
+    virtual bool shouldClose() const = 0;
+    virtual void setEventCallback(const EventCallback &cb) = 0;
+    virtual void setMouseCallback(const MouseCallback &cb) = 0;
 };
 
 class WindowManager {
 public:
     virtual ~WindowManager() = default;
-
-    // Create a window of given size and title
-    virtual std::shared_ptr<Window> create_window(int width, int height, const std::string &title) = 0;
-
-    // Run the main loop until quit
+    virtual std::shared_ptr<Window> createWindow(int width, int height, const std::string &title) = 0;
     virtual int run() = 0;
-    virtual void request_quit() = 0;
-
-    virtual void poll_events() = 0;   // process pending events without blocking
-    virtual void wait_events() = 0;   // block until at least one event is processed
-
-    // Factories
-    static std::unique_ptr<WindowManager> create_default();
-    static std::unique_ptr<WindowManager> create_wayland();
+    virtual void requestQuit() = 0;
+    virtual void pollEvents() = 0;
+    virtual void waitEvents() = 0;
+    virtual void setEventCallback(const EventCallback &cb) = 0;
+    virtual void setErrorCallback(const ErrorCallback &cb) = 0;
+    static std::unique_ptr<WindowManager> createDefault();
+    static std::unique_ptr<WindowManager> createWayland();
 };
 
 }

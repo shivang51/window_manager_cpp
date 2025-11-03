@@ -5,16 +5,16 @@
 
 namespace wm {
 
-std::unique_ptr<WindowManager> WindowManager::create_default()
+std::unique_ptr<WindowManager> WindowManager::createDefault()
 {
 #if defined(__linux__)
-    return WindowManager::create_wayland();
+    return WindowManager::createWayland();
 #else
     return nullptr;
 #endif
 }
 
-std::unique_ptr<WindowManager> WindowManager::create_wayland()
+std::unique_ptr<WindowManager> WindowManager::createWayland()
 {
     return wayland_impl::WaylandWindowManager::create();
 }
